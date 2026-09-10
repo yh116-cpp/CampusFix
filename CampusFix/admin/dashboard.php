@@ -1,7 +1,7 @@
 <?php
 session_start();
 
-// 权限检查：确保管理员已登录
+// 1. 权限检查：确保管理员已登录
 if(!isset($_SESSION["admin_logged_in"]) || $_SESSION["admin_logged_in"] !== true){
     header("location: auth-login.php");
     exit;
@@ -10,16 +10,16 @@ if(!isset($_SESSION["admin_logged_in"]) || $_SESSION["admin_logged_in"] !== true
 require_once "../config/database.php";
 /** @var mysqli $link */
 
-// 获取搜索关键词
+// 2. 获取搜索关键词
 $search = "";
 if(isset($_GET['search'])){
     $search = trim($_GET['search']);
 }
 
-// 修改状态的逻辑（保留你原本的 dispatch 分配/更新状态功能）
+// 3. 修改状态的逻辑（加上了重定向，解决点击 Update 异常退出的问题）
 if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_status'])){
-    $request_id = $_POST['request_id'];
-    $new_status = $_POST['status'];
+    $request_id = intval($_POST['request_id']);
+    $new_status = trim($_POST['status']);
     
     $sql_update = "UPDATE repair_requests SET status = ? WHERE id = ?";
     if($stmt_update = mysqli_prepare($link, $sql_update)){
@@ -27,6 +27,14 @@ if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_status'])){
         mysqli_stmt_execute($stmt_update);
         mysqli_stmt_close($stmt_update);
     }
+
+    // 🌟 关键修复：更新完成后，重定向回当前页面（保持搜索条件），防止表单重复提交和 Session 紊乱
+    $redirect_url = "dashboard.php";
+    if(!empty($search)){
+        $redirect_url .= "?search=" . urlencode($search);
+    }
+    header("Location: " . $redirect_url);
+        exit; // 必须 exit 确保后面代码不继续执行
 }
 ?>
 <!DOCTYPE html>
@@ -46,7 +54,7 @@ if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_status'])){
             </div>
             <nav>
                 <a href="#" class="active">Dispatch Console</a>
-                <a href="auth-logout.php" style="color: #dc3545;">Logout (<?php echo htmlspecialchars($_SESSION["admin_user"]); ?>)</a>
+                <a href="auth-logout.php" style="color: #dc3545;">Logout (<?php echo htmlspecialchars($_SESSION["admin_user"] ?? 'Admin'); ?>)</a>
             </nav>
         </div>
     </div>
@@ -59,7 +67,7 @@ if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_status'])){
                     <p>Review student reports and dispatch tasks from oldest to newest.</p>
                 </div>
                 
-                <!-- 🌟 重新设计的原生搜索栏（适配你的 global.css 表单样式，不突兀） -->
+                <!-- 原生搜索栏 -->
                 <form action="dashboard.php" method="GET" style="display: flex; gap: 10px; align-items: center; margin: 0;">
                     <input type="text" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search block, category, description..." style="padding: 8px 12px; width: 260px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
                     <button type="submit" class="btn-submit" style="margin: 0; padding: 8px 16px; background-color: #00829B; width: auto;">Search</button>
@@ -84,32 +92,26 @@ if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_status'])){
                     </thead>
                     <tbody>
                     <?php
-                    // 🌟 1. 动态拼接搜索 SQL 条件
+                    // 动态拼接搜索 SQL 条件
                     if(!empty($search)){
-                        // 支持模糊搜索单号、地点、分类、描述
                         $sql_hist = "SELECT id, student_id, block, floor, room, category, description, created_at, status 
                                      FROM repair_requests 
                                      WHERE id LIKE ? OR block LIKE ? OR category LIKE ? OR description LIKE ?
-                                     ORDER BY id ASC"; // 🌟 2. 核心要求：按 ID 从小到大排序（ASC）
+                                     ORDER BY id ASC";
                         $stmt_hist = mysqli_prepare($link, $sql_hist);
                         $search_param = "%" . $search . "%";
                         mysqli_stmt_bind_param($stmt_hist, "ssss", $search_param, $search_param, $search_param, $search_param);
                     } else {
-                        // 无搜索时，直接按 ID 从小到大排序（ASC）
                         $sql_hist = "SELECT id, student_id, block, floor, room, category, description, created_at, status 
                                      FROM repair_requests 
-                                     ORDER BY id ASC"; // 🌟 2. 核心要求：按 ID 从小到大排序（ASC）
+                                     ORDER BY id ASC";
                         $stmt_hist = mysqli_prepare($link, $sql_hist);
                     }
 
                     if($stmt_hist){
-                        if(!empty($search)){
-                            mysqli_stmt_execute($stmt_hist);
-                        } else {
-                            mysqli_stmt_execute($stmt_hist);
-                        }
-                        
+                        mysqli_stmt_execute($stmt_hist);
                         $res = mysqli_stmt_get_result($stmt_hist);
+                        
                         if(mysqli_num_rows($res) > 0){
                             while($row = mysqli_fetch_assoc($res)){
                                 echo "<tr>";
